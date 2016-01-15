@@ -108,7 +108,14 @@ class ActionModule(ActionBase):
 
         result = super(ActionModule, self).run(tmp, task_vars)
 
+        # We may need to switch to local connection
         original_transport = task_vars.get('ansible_connection') or self._play_context.connection
+        # We do need to not use privilege escalation on the machine running
+        # the module.  Instead we run it on the machine rsync is connecting
+        # to.
+        original_become = self._play_context.become
+        self._play_context.become = False
+
         remote_transport = False
         if original_transport != 'local':
             remote_transport = True
@@ -231,9 +238,17 @@ class ActionModule(ActionBase):
         # Allow custom rsync path argument
         rsync_path = self._task.args.get('rsync_path', None)
 
-        # If no rsync_path is set, sudo was originally set, and dest is remote then add 'sudo rsync' argument
-        if not rsync_path and transport_overridden and self._play_context.become and self._play_context.become_method == 'sudo' and not dest_is_local:
-            rsync_path = 'sudo rsync'
+        if dest_is_local:
+            # Restore the become settings because a local connection will
+            # perform privilege escalation for both sides of the connection
+            # equally
+            self._play_context.become = original_become
+        elif not rsync_path and transport_overridden and original_become:
+            # If no rsync_path is set, become was originally set, and dest is
+            # remote then add privilege escalation here.
+            if self._play_context.become_method == 'sudo':
+                rsync_path = 'sudo rsync'
+            # TODO: have to add in the rest of the become methods here
 
         # make sure rsync path is quoted.
         if rsync_path:
