@@ -37,15 +37,12 @@ except ImportError:
         def get_basedir(self, variables):
             return self.basedir
 
-<<<<<<< HEAD
-=======
 try:
     from __main__ import display
 except ImportError:
     from ansible.utils.display import Display
     display = Display()
 
->>>>>>> devel
 _use_vault_cache = os.environ.get("ANSIBLE_HASHICORP_VAULT_USE_CACHE", "yes").lower() in ("yes", "1", "true")
 _vault_cache = {}
 
@@ -58,11 +55,8 @@ class LookupModule(LookupBase):
         # Ansible variables are passed via "variables" in ansible 2.x, "inject" in 1.9.x
 
         basedir = self.get_basedir(variables)
-<<<<<<< HEAD
 
-=======
         display.vvvv(u"VAULT - basedir=" + basedir)
->>>>>>> devel
         if hasattr(ansible.utils, 'listify_lookup_plugin_terms'):
             # ansible-1.9.x
             terms = ansible.utils.listify_lookup_plugin_terms(terms, basedir, inject)
@@ -147,10 +141,7 @@ class LookupModule(LookupBase):
                 token_result = self._fetch_token(cafile, capath, github_token, url, cahostverify)
                 vault_token = token_result['auth']['client_token']
             result = self._fetch_remotely(cafile, capath, data, key, vault_token, url, cahostverify)
-<<<<<<< HEAD
-=======
 
->>>>>>> devel
             if _use_vault_cache:
                 _vault_cache[key] = result
 
@@ -180,25 +171,17 @@ class LookupModule(LookupBase):
     def _fetch_remotely(self, cafile, capath, data, key, vault_token, url, cahostverify):
         try:
             request_url = urljoin(url, "v1/%s" % (key))
-<<<<<<< HEAD
-            headers = {'X-Vault-Token': vault_token, 'Content-Type': 'application/json', 'Accept': 'applicaiton/json'}
-            response = requests.get(request_url, headers=headers, verify=False)
-=======
             display.vvvv(request_url)
             headers = {'X-Vault-Token': vault_token, 'Content-Type': 'application/json', 'Accept': 'applicaiton/json'}
             response = requests.get(request_url, headers=headers, verify=False)
             
->>>>>>> devel
         except AttributeError as e:
             raise AnsibleError('Unable to read %s from vault: %s' % (key, e))
         except urllib2.HTTPError as e:
             raise AnsibleError('Unable to read %s from vault: %s' % (key, e))
         except Exception as e:
             raise AnsibleError('Unable to read %s from vault: %s' % (key, e))
-<<<<<<< HEAD
-        # result =
-=======
 
->>>>>>> devel
         result = response.json()
         return result
+
