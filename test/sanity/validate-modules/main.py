@@ -41,7 +41,7 @@ from ansible.utils.plugin_docs import BLACKLIST, get_docstring
 
 from module_args import get_argument_spec
 
-from schema import doc_schema, metadata_schema, return_schema
+from schema import doc_schema, metadata_1_1_schema, return_schema
 
 from utils import CaptureStd, parse_yaml
 from voluptuous.humanize import humanize_error
@@ -225,6 +225,8 @@ class ModuleValidator(Validator):
         'setup.ps1'
     ))
 
+    WHITELIST_FUTURE_IMPORTS = frozenset(('absolute_import', 'division', 'print_function'))
+
     def __init__(self, path, analyze_arg_spec=False, base_branch=None, git_cache=None, reporter=None):
         super(ModuleValidator, self).__init__(reporter=reporter or Reporter())
 
@@ -283,9 +285,18 @@ class ModuleValidator(Validator):
         return False
 
     def _just_docs(self):
+        """Module can contain just docs and from __future__ boilerplate
+        """
         try:
             for child in self.ast.body:
                 if not isinstance(child, ast.Assign):
+                    # allowed from __future__ imports
+                    if isinstance(child, ast.ImportFrom) and child.module == '__future__':
+                        for future_import in child.names:
+                            if future_import.name not in self.WHITELIST_FUTURE_IMPORTS:
+                                break
+                        else:
+                            continue
                     return False
             return True
         except AttributeError:
@@ -558,6 +569,20 @@ class ModuleValidator(Validator):
 
         for child in self.ast.body:
             if isinstance(child, (ast.Import, ast.ImportFrom)):
+                if isinstance(child, ast.ImportFrom) and child.module == '__future__':
+                    # allowed from __future__ imports
+                    for future_import in child.names:
+                        if future_import.name not in self.WHITELIST_FUTURE_IMPORTS:
+                            self.reporter.error(
+                                path=self.object_path,
+                                code=209,
+                                msg=('Only the following from __future__ imports are allowed: %s'
+                                     % ', '.join(self.WHITELIST_FUTURE_IMPORTS)),
+                                line=child.lineno
+                            )
+                            break
+                    else:  # for-else.  If we didn't find a problem nad break out of the loop, then this is a legal import
+                        continue
                 import_lines.append(child.lineno)
                 if child.lineno < min_doc_line:
                     self.reporter.error(
@@ -611,18 +636,12 @@ class ModuleValidator(Validator):
                     )
 
     def _find_ps_replacers(self):
-        if 'WANT_JSON' not in self.text:
-            self.reporter.error(
-                path=self.object_path,
-                code=206,
-                msg='WANT_JSON not found in module'
-            )
-
-        if REPLACER_WINDOWS not in self.text:
+        ps_module_util_template = '#Requires -Module Ansible.ModuleUtils.'
+        if ps_module_util_template not in self.text and REPLACER_WINDOWS not in self.text:
             self.reporter.error(
                 path=self.object_path,
                 code=207,
-                msg='"%s" not found in module' % REPLACER_WINDOWS
+                msg='"%s" not found in module' % ps_module_util_template
             )
 
     def _find_ps_docs_py_file(self):
@@ -783,7 +802,14 @@ class ModuleValidator(Validator):
                             msg='Module deprecated, but DOCUMENTATION.deprecated is missing'
                         )
 
-                self._validate_docs_schema(doc, doc_schema(self.object_name.split('.')[0]), 'DOCUMENTATION', 305)
+                if os.path.islink(self.object_path):
+                    # This module has an alias, which we can tell as it's a symlink
+                    # Rather than checking for `module: $filename` we need to check against the true filename
+                    self._validate_docs_schema(doc, doc_schema(os.readlink(self.object_path).split('.')[0]), 'DOCUMENTATION', 305)
+                else:
+                    # This is the normal case
+                    self._validate_docs_schema(doc, doc_schema(self.object_name.split('.')[0]), 'DOCUMENTATION', 305)
+
                 self._check_version_added(doc)
                 self._check_for_new_args(doc)
 
@@ -873,7 +899,7 @@ class ModuleValidator(Validator):
                     )
 
             if metadata:
-                self._validate_docs_schema(metadata, metadata_schema(deprecated),
+                self._validate_docs_schema(metadata, metadata_1_1_schema(deprecated),
                                            'ANSIBLE_METADATA', 316)
 
         return doc_info
@@ -961,7 +987,11 @@ class ModuleValidator(Validator):
         strict_ansible_version = StrictVersion(should_be)
 
         for option, details in options.items():
-            names = [option] + details.get('aliases', [])
+            try:
+                names = [option] + details.get('aliases', [])
+            except AttributeError:
+                # Reporting of this syntax error will be handled by schema validation.
+                continue
 
             if any(name in existing_options for name in names):
                 continue

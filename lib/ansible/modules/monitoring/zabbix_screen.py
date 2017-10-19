@@ -2,25 +2,13 @@
 # -*- coding: utf-8 -*-
 
 # (c) 2013-2014, Epic Games, Inc.
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible. If not, see <http://www.gnu.org/licenses/>.
-#
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
 
 
-ANSIBLE_METADATA = {'metadata_version': '1.0',
+ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['preview'],
                     'supported_by': 'community'}
 
@@ -40,35 +28,6 @@ requirements:
     - "python >= 2.6"
     - zabbix-api
 options:
-    server_url:
-        description:
-            - Url of Zabbix server, with protocol (http or https).
-        required: true
-        aliases: [ "url" ]
-    login_user:
-        description:
-            - Zabbix user name.
-        required: true
-    login_password:
-        description:
-            - Zabbix user password.
-        required: true
-    http_login_user:
-        description:
-            - Basic Auth login
-        required: false
-        default: None
-        version_added: "2.1"
-    http_login_password:
-        description:
-            - Basic Auth password
-        required: false
-        default: None
-        version_added: "2.1"
-    timeout:
-        description:
-            - The timeout of API request (seconds).
-        default: 10
     screens:
         description:
             - List of screens to be created/updated/deleted(see example).
@@ -79,6 +38,10 @@ options:
               The available states are: C(present) (default) and C(absent). If the screen(s) already exists, and the state is not C(absent), the screen(s)
               will just be updated as needed.
         required: true
+
+extends_documentation_fragment:
+    - zabbix
+
 notes:
     - Too many concurrent updates to the same screen may cause Zabbix to return errors, see examples for a workaround if needed.
 '''
@@ -157,13 +120,16 @@ try:
     class ZabbixAPIExtends(ZabbixAPI):
         screenitem = None
 
-        def __init__(self, server, timeout, user, passwd, **kwargs):
-            ZabbixAPI.__init__(self, server, timeout=timeout, user=user, passwd=passwd)
+        def __init__(self, server, timeout, user, passwd, validate_certs, **kwargs):
+            ZabbixAPI.__init__(self, server, timeout=timeout, user=user, passwd=passwd, validate_certs=validate_certs)
             self.screenitem = ZabbixAPISubClass(self, dict({"prefix": "screenitem"}, **kwargs))
 
     HAS_ZABBIX_API = True
 except ImportError:
     HAS_ZABBIX_API = False
+
+from ansible.module_utils.basic import AnsibleModule
+
 
 class Screen(object):
     def __init__(self, module, zbx):
@@ -291,7 +257,7 @@ class Screen(object):
                 h_size = 2
             else:
                 h_size = 3
-            v_size = (v_size - 1) / h_size + 1
+            v_size = (v_size - 1) // h_size + 1
         return h_size, v_size
 
     # create screen_items
@@ -313,7 +279,7 @@ class Screen(object):
                     if graph_id is not None:
                         self._zapi.screenitem.create({'screenid': screen_id, 'resourcetype': 0, 'resourceid': graph_id,
                                                       'width': width, 'height': height,
-                                                      'x': i % h_size, 'y': i / h_size, 'colspan': 1, 'rowspan': 1,
+                                                      'x': i % h_size, 'y': i // h_size, 'colspan': 1, 'rowspan': 1,
                                                       'elements': 0, 'valign': 0, 'halign': 0,
                                                       'style': 0, 'dynamic': 0, 'sort_triggers': 0})
             else:
@@ -338,6 +304,7 @@ def main():
             login_password=dict(type='str', required=True, no_log=True),
             http_login_user=dict(type='str', required=False, default=None),
             http_login_password=dict(type='str', required=False, default=None, no_log=True),
+            validate_certs=dict(type='bool', required=False, default=True),
             timeout=dict(type='int', default=10),
             screens=dict(type='list', required=True)
         ),
@@ -352,13 +319,15 @@ def main():
     login_password = module.params['login_password']
     http_login_user = module.params['http_login_user']
     http_login_password = module.params['http_login_password']
+    validate_certs = module.params['validate_certs']
     timeout = module.params['timeout']
     screens = module.params['screens']
 
     zbx = None
     # login to zabbix
     try:
-        zbx = ZabbixAPIExtends(server_url, timeout=timeout, user=http_login_user, passwd=http_login_password)
+        zbx = ZabbixAPIExtends(server_url, timeout=timeout, user=http_login_user, passwd=http_login_password,
+                               validate_certs=validate_certs)
         zbx.login(login_user, login_password)
     except Exception as e:
         module.fail_json(msg="Failed to connect to Zabbix server: %s" % e)
@@ -436,7 +405,6 @@ def main():
     else:
         module.exit_json(changed=False)
 
-from ansible.module_utils.basic import *
 
 if __name__ == '__main__':
     main()

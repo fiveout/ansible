@@ -19,7 +19,6 @@
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
-import base64
 import time
 import traceback
 
@@ -32,7 +31,6 @@ from ansible.playbook.conditional import Conditional
 from ansible.playbook.task import Task
 from ansible.plugins.connection import ConnectionBase
 from ansible.template import Templar
-from ansible.utils.encrypt import key_for_hostname
 from ansible.utils.listify import listify_lookup_plugin_terms
 from ansible.utils.unsafe_proxy import UnsafeProxy, wrap_var
 
@@ -81,7 +79,7 @@ class TaskExecutor:
         returned as a dict.
         '''
 
-        display.debug("in run()")
+        display.debug("in run() - task %s" % self._task._uuid)
 
         try:
             try:
@@ -148,7 +146,7 @@ class TaskExecutor:
                             else:
                                 raise
                 elif isinstance(res, list):
-                    for (idx, item) in enumerate(res):
+                    for idx, item in enumerate(res):
                         res[idx] = _clean_res(item, errors=errors)
                 return res
 
@@ -191,20 +189,20 @@ class TaskExecutor:
 
         templar = Templar(loader=self._loader, shared_loader_obj=self._shared_loader_obj, variables=self._job_vars)
         items = None
-        if self._task.loop:
-            if self._task.loop in self._shared_loader_obj.lookup_loader:
+        if self._task.loop_with:
+            if self._task.loop_with in self._shared_loader_obj.lookup_loader:
                 fail = True
-                if self._task.loop == 'first_found':
+                if self._task.loop_with == 'first_found':
                     # first_found loops are special. If the item is undefined then we want to fall through to the next value rather than failing.
                     fail = False
 
-                loop_terms = listify_lookup_plugin_terms(terms=self._task.loop_args, templar=templar, loader=self._loader, fail_on_undefined=fail,
+                loop_terms = listify_lookup_plugin_terms(terms=self._task.loop, templar=templar, loader=self._loader, fail_on_undefined=fail,
                                                          convert_bare=False)
                 if not fail:
                     loop_terms = [t for t in loop_terms if not templar._contains_vars(t)]
 
                 # get lookup
-                mylookup = self._shared_loader_obj.lookup_loader.get(self._task.loop, loader=self._loader, templar=templar)
+                mylookup = self._shared_loader_obj.lookup_loader.get(self._task.loop_with, loader=self._loader, templar=templar)
 
                 # give lookup task 'context' for subdir (mostly needed for first_found)
                 for subdir in ['template', 'var', 'file']:  # TODO: move this to constants?
@@ -215,7 +213,12 @@ class TaskExecutor:
                 # run lookup
                 items = mylookup.run(terms=loop_terms, variables=self._job_vars, wantlist=True)
             else:
-                raise AnsibleError("Unexpected failure in finding the lookup named '%s' in the available lookup plugins" % self._task.loop)
+                raise AnsibleError("Unexpected failure in finding the lookup named '%s' in the available lookup plugins" % self._task.loop_with)
+
+        elif self._task.loop:
+            items = templar.template(self._task.loop)
+            if not isinstance(items, list):
+                raise AnsibleError("Invalid data passed to 'loop' it requires a list, got this instead: %s" % items)
 
         # now we restore any old job variables that may have been modified,
         # and delete them if they were in the play context vars but not in
@@ -266,7 +269,10 @@ class TaskExecutor:
                             u" to something else to avoid variable collisions and unexpected behavior." % loop_var)
 
         ran_once = False
-        items = self._squash_items(items, loop_var, task_vars)
+        if self._task.loop_with:
+            # Only squash with 'with_:' not with the 'loop:', 'magic' squashing can be removed once with_ loops are
+            items = self._squash_items(items, loop_var, task_vars)
+
         for item in items:
             task_vars[loop_var] = item
 
@@ -414,6 +420,8 @@ class TaskExecutor:
             # We also add "magic" variables back into the variables dict to make sure
             # a certain subset of variables exist.
             self._play_context.update_vars(variables)
+
+            # FIXME: update connection/shell plugin options
         except AnsibleError as e:
             # save the error, which we'll raise later if we don't end up
             # skipping this task during the conditional evaluation step
@@ -430,18 +438,18 @@ class TaskExecutor:
         except AnsibleError:
             # loop error takes precedence
             if self._loop_eval_error is not None:
-                raise self._loop_eval_error
+                raise self._loop_eval_error  # pylint: disable=raising-bad-type
             # skip conditional exception in the case of includes as the vars needed might not be available except in the included tasks or due to tags
             if self._task.action not in ['include', 'include_tasks', 'include_role']:
                 raise
 
         # Not skipping, if we had loop error raised earlier we need to raise it now to halt the execution of this task
         if self._loop_eval_error is not None:
-            raise self._loop_eval_error
+            raise self._loop_eval_error  # pylint: disable=raising-bad-type
 
         # if we ran into an error while setting up the PlayContext, raise it now
         if context_validation_error is not None:
-            raise context_validation_error
+            raise context_validation_error  # pylint: disable=raising-bad-type
 
         # if this task is a TaskInclude, we just return now with a success code so the
         # main thread can expand the task list for the given host
@@ -474,18 +482,11 @@ class TaskExecutor:
                 not getattr(self._connection, 'connected', False) or
                 self._play_context.remote_addr != self._connection._play_context.remote_addr):
             self._connection = self._get_connection(variables=variables, templar=templar)
-            hostvars = variables.get('hostvars', None)
             # only template the vars if the connection actually implements set_host_overrides
             # NB: this is expensive, and should be removed once connection-specific vars are being handled by play_context
             sho_impl = getattr(type(self._connection), 'set_host_overrides', None)
-            if hostvars and sho_impl and sho_impl != ConnectionBase.set_host_overrides:
-                try:
-                    target_hostvars = hostvars.get(self._host.name)
-                except:
-                    # FIXME: this should catch the j2undefined error here
-                    #        specifically instead of all exceptions
-                    target_hostvars = dict()
-                self._connection.set_host_overrides(host=self._host, hostvars=target_hostvars)
+            if sho_impl and sho_impl != ConnectionBase.set_host_overrides:
+                self._connection.set_host_overrides(self._host, variables, templar)
         else:
             # if connection is reused, its _play_context is no longer valid and needs
             # to be replaced with the one templated above, in case other data changed
@@ -566,9 +567,7 @@ class TaskExecutor:
                 return failed_when_result
 
             if 'ansible_facts' in result:
-                if not C.NAMESPACE_FACTS:
-                    vars_copy.update(result['ansible_facts'])
-                vars_copy.update({'ansible_facts': result['ansible_facts']})
+                vars_copy.update(result['ansible_facts'])
 
             # set the failed property if it was missing.
             if 'failed' not in result:
@@ -614,9 +613,7 @@ class TaskExecutor:
             variables[self._task.register] = wrap_var(result)
 
         if 'ansible_facts' in result:
-            if not C.NAMESPACE_FACTS:
-                variables.update(result['ansible_facts'])
-            variables.update({'ansible_facts': result['ansible_facts']})
+            variables.update(result['ansible_facts'])
 
         # save the notification target in the result, if it was specified, as
         # this task may be running in a loop in which case the notification
@@ -735,45 +732,10 @@ class TaskExecutor:
             conn_type = self._play_context.connection
 
         connection = self._shared_loader_obj.connection_loader.get(conn_type, self._play_context, self._new_stdin)
-
         if not connection:
             raise AnsibleError("the connection plugin '%s' was not found" % conn_type)
 
-        if self._play_context.accelerate:
-            # accelerate is deprecated as of 2.1...
-            display.deprecated('Accelerated mode is deprecated. Consider using SSH with ControlPersist and pipelining enabled instead', version='2.6')
-            # launch the accelerated daemon here
-            ssh_connection = connection
-            handler = self._shared_loader_obj.action_loader.get(
-                'normal',
-                task=self._task,
-                connection=ssh_connection,
-                play_context=self._play_context,
-                loader=self._loader,
-                templar=templar,
-                shared_loader_obj=self._shared_loader_obj,
-            )
-
-            key = key_for_hostname(self._play_context.remote_addr)
-            accelerate_args = dict(
-                password=base64.b64encode(key.__str__()),
-                port=self._play_context.accelerate_port,
-                minutes=C.ACCELERATE_DAEMON_TIMEOUT,
-                ipv6=self._play_context.accelerate_ipv6,
-                debug=self._play_context.verbosity,
-            )
-
-            connection = self._shared_loader_obj.connection_loader.get('accelerate', self._play_context, self._new_stdin)
-            if not connection:
-                raise AnsibleError("the connection plugin '%s' was not found" % conn_type)
-
-            try:
-                connection._connect()
-            except AnsibleConnectionFailure:
-                display.debug('connection failed, fallback to accelerate')
-                res = handler._execute_module(module_name='accelerate', module_args=accelerate_args, task_vars=variables, delete_remote_tmp=False)
-                display.debug(res)
-                connection._connect()
+        self._play_context.set_options_from_plugin(connection)
 
         return connection
 

@@ -19,8 +19,6 @@
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
-import os
-import re
 import sys
 
 from ansible import constants as C
@@ -28,7 +26,6 @@ from ansible.errors import AnsibleError
 from ansible.inventory.group import Group
 from ansible.inventory.host import Host
 from ansible.module_utils.six import iteritems
-from ansible.module_utils._text import to_bytes
 from ansible.plugins.cache import FactCache
 from ansible.utils.vars import combine_vars
 from ansible.utils.path import basedir
@@ -104,23 +101,6 @@ class InventoryData(object):
 
         return new_host
 
-    def _scan_groups_for_host(self, hostname, localhost=False):
-        ''' in case something did not update inventory correctly, fallback to group scan '''
-
-        found = None
-        for group in self.groups.values():
-            for host in group.get_hosts():
-                if hostname == host.name:
-                    found = host
-                    break
-            if found:
-                break
-
-        if found:
-            display.debug('Found host (%s) in groups but it was missing from main inventory' % hostname)
-
-        return found
-
     def reconcile_inventory(self):
         ''' Ensure inventory basic rules, run after updates '''
 
@@ -132,6 +112,10 @@ class InventoryData(object):
         for g in self.groups:
             group = self.groups[g]
             group_names.add(group.name)
+
+            # ensure all groups inherit from 'all'
+            if group.name != 'all' and not group.get_ancestors():
+                self.add_child('all', group.name)
 
         host_names = set()
         # get host vars from host_vars/ files and vars plugins
@@ -166,26 +150,14 @@ class InventoryData(object):
         self._groups_dict_cache = {}
 
     def get_host(self, hostname):
-        ''' fetch host object using name
-            deal with implicit localhost
-            and possible inconsistent inventory '''
+        ''' fetch host object using name deal with implicit localhost '''
 
         matching_host = self.hosts.get(hostname, None)
 
         # if host is not in hosts dict
-        if matching_host is None:
-
+        if matching_host is None and hostname in C.LOCALHOST:
             # might need to create implicit localhost
-            if hostname in C.LOCALHOST:
-                matching_host = self._create_implicit_localhost(hostname)
-
-            # might be inconsistent inventory, search groups
-            if matching_host is None:
-                matching_host = self._scan_groups_for_host(hostname)
-
-            # if found/created update hosts dict
-            if matching_host:
-                self.hosts[hostname] = matching_host
+            matching_host = self._create_implicit_localhost(hostname)
 
         return matching_host
 
@@ -214,7 +186,7 @@ class InventoryData(object):
             h = Host(host, port)
             self.hosts[host] = h
             if self.current_source:  # set to 'first source' in which host was encountered
-                self.set_variable(host, 'inventory_file', os.path.basename(self.current_source))
+                self.set_variable(host, 'inventory_file', self.current_source)
                 self.set_variable(host, 'inventory_dir', basedir(self.current_source))
             else:
                 self.set_variable(host, 'inventory_file', None)
@@ -231,7 +203,7 @@ class InventoryData(object):
         else:
             h = self.hosts[host]
 
-        if g and h not in g.get_hosts():
+        if g:
             g.add_host(h)
             self._groups_dict_cache = {}
             display.debug("Added host %s to group %s" % (host, group))

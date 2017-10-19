@@ -140,10 +140,16 @@ class IntegrationConfig(TestConfig):
         self.start_at_task = args.start_at_task  # type: str
         self.allow_destructive = args.allow_destructive if 'allow_destructive' in args else False  # type: bool
         self.retry_on_error = args.retry_on_error  # type: bool
+        self.continue_on_error = args.continue_on_error  # type: bool
         self.debug_strategy = args.debug_strategy  # type: bool
+        self.changed_all_target = args.changed_all_target  # type: str
+        self.list_targets = args.list_targets  # type: bool
         self.tags = args.tags
         self.skip_tags = args.skip_tags
         self.diff = args.diff
+
+        if self.list_targets:
+            self.explain = True
 
 
 class PosixIntegrationConfig(IntegrationConfig):
@@ -181,6 +187,7 @@ class NetworkIntegrationConfig(IntegrationConfig):
         super(NetworkIntegrationConfig, self).__init__(args, 'network-integration')
 
         self.platform = args.platform  # type: list [str]
+        self.inventory = args.inventory  # type: str
 
 
 class UnitsConfig(TestConfig):

@@ -34,6 +34,7 @@ from lib.executor import (
 )
 
 from lib.config import (
+    IntegrationConfig,
     PosixIntegrationConfig,
     WindowsIntegrationConfig,
     NetworkIntegrationConfig,
@@ -81,7 +82,7 @@ def main():
         config = args.config(args)
         display.verbosity = config.verbosity
         display.color = config.color
-        display.info_stderr = isinstance(config, SanityConfig) and config.lint
+        display.info_stderr = (isinstance(config, SanityConfig) and config.lint) or (isinstance(config, IntegrationConfig) and config.list_targets)
         check_startup()
 
         try:
@@ -216,9 +217,22 @@ def parse_args():
                              action='store_true',
                              help='retry failed test with increased verbosity')
 
+    integration.add_argument('--continue-on-error',
+                             action='store_true',
+                             help='continue after failed test')
+
     integration.add_argument('--debug-strategy',
                              action='store_true',
                              help='run test playbooks using the debug strategy')
+
+    integration.add_argument('--changed-all-target',
+                             metavar='TARGET',
+                             default='all',
+                             help='target to run when all tests are needed')
+
+    integration.add_argument('--list-targets',
+                             action='store_true',
+                             help='list matching targets instead of running tests')
 
     subparsers = parser.add_subparsers(metavar='COMMAND')
     subparsers.required = True  # work-around for python 3 bug which makes subparsers optional
@@ -245,6 +259,10 @@ def parse_args():
                                      metavar='PLATFORM',
                                      action='append',
                                      help='network platform/version').completer = complete_network_platform
+
+    network_integration.add_argument('--inventory',
+                                     metavar='PATH',
+                                     help='path to inventory used for tests')
 
     windows_integration = subparsers.add_parser('windows-integration',
                                                 parents=[integration],

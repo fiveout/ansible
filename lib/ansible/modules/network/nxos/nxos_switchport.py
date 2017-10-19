@@ -16,10 +16,9 @@
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #
 
-ANSIBLE_METADATA = {
-    'metadata_version': '1.0',
-    'status': ['preview'],
-    'supported_by': 'community'}
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'network'}
 
 DOCUMENTATION = '''
 ---
@@ -31,6 +30,7 @@ description:
   - Manages Layer 2 interfaces
 author: Jason Edelman (@jedelman8)
 notes:
+  - Tested against NXOSv 7.3.(0)D1(1) on VIRL
   - When C(state=absent), VLANs can be added/removed from trunk links and
     the existing access VLAN can be 'unconfigured' to just having VLAN 1
     on that interface.
@@ -307,7 +307,7 @@ def get_switchport_config_commands(interface, existing, proposed, module):
         commands.append(command)
 
     if proposed_mode == 'access':
-        av_check = existing.get('access_vlan') == proposed.get('access_vlan')
+        av_check = str(existing.get('access_vlan')) == str(proposed.get('access_vlan'))
         if not av_check:
             command = 'switchport access vlan {0}'.format(proposed.get('access_vlan'))
             commands.append(command)
@@ -328,7 +328,7 @@ def get_switchport_config_commands(interface, existing, proposed, module):
                     command = 'switchport trunk allowed vlan add {0}'.format(proposed.get('trunk_vlans'))
                     commands.append(command)
 
-        native_check = existing.get('native_vlan') == proposed.get('native_vlan')
+        native_check = str(existing.get('native_vlan')) == str(proposed.get('native_vlan'))
         if not native_check and proposed.get('native_vlan'):
             command = 'switchport trunk native vlan {0}'.format(proposed.get('native_vlan'))
             commands.append(command)
@@ -347,8 +347,8 @@ def is_switchport_default(existing):
            vlan 1 and trunk all and mode is access
     """
 
-    c1 = existing['access_vlan'] == '1'
-    c2 = existing['native_vlan'] == '1'
+    c1 = str(existing['access_vlan']) == '1'
+    c2 = str(existing['native_vlan']) == '1'
     c3 = existing['trunk_vlans'] == '1-4094'
     c4 = existing['mode'] == 'access'
 
@@ -434,11 +434,12 @@ def apply_value_map(value_map, resource):
 
 
 def execute_show_command(command, module, command_type='cli_show'):
-    if module.params['transport'] == 'cli':
+    provider = module.params['provider']
+    if provider['transport'] == 'cli':
         command += ' | json'
         cmds = [command]
         body = run_commands(module, cmds)
-    elif module.params['transport'] == 'nxapi':
+    elif provider['transport'] == 'nxapi':
         cmds = [command]
         body = run_commands(module, cmds)
 
@@ -577,6 +578,7 @@ def main():
     results['warnings'] = warnings
 
     module.exit_json(**results)
+
 
 if __name__ == '__main__':
     main()

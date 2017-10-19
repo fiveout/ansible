@@ -1,28 +1,12 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 #
-# Copyright 2017 F5 Networks Inc.
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# Copyright (c) 2017 F5 Networks Inc.
+# GNU General Public License v3.0 (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {
-    'status': ['preview'],
-    'supported_by': 'community',
-    'metadata_version': '1.0'
-}
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
 
 DOCUMENTATION = '''
 ---
@@ -35,24 +19,19 @@ options:
   full_name:
     description:
       - Full name of the user.
-    required: false
   username_credential:
     description:
       - Name of the user to create, remove or modify.
-    required: true
+    required: True
     aliases:
       - name
   password_credential:
     description:
       - Set the users password to this unencrypted value.
         C(password_credential) is required when creating a new account.
-    default: None
-    required: false
   shell:
     description:
       - Optionally set the users shell.
-    required: false
-    default: None
     choices:
       - bash
       - none
@@ -67,13 +46,10 @@ options:
         C(operator), C(resource-admin), C(user-manager), C(web-application-security-administrator),
         and C(web-application-security-editor). Partition portion of tuple should
         be an existing partition or the value 'all'.
-    required: false
-    default: None
   state:
     description:
       - Whether the account should exist or not, taking action if the state is
         different from what is stated.
-    required: false
     default: present
     choices:
       - present
@@ -82,14 +58,13 @@ options:
     description:
       - C(always) will allow to update passwords if the user chooses to do so.
         C(on_create) will only set the password for newly created users.
-    required: false
     default: on_create
     choices:
       - always
       - on_create
 notes:
-   - Requires the requests Python package on the host. This is as easy as
-     pip install requests
+   - Requires the f5-sdk Python package on the host. This is as easy as
+     pip install f5-sdk.
    - Requires BIG-IP versions >= 12.0.0
 extends_documentation_fragment: f5
 requirements:
@@ -560,26 +535,16 @@ class ArgumentSpec(object):
                 aliases=['username_credential']
             ),
             password_credential=dict(
-                required=False,
-                default=None,
                 no_log=True,
             ),
             partition_access=dict(
-                required=False,
-                default=None,
                 type='list'
             ),
-            full_name=dict(
-                required=False,
-                default=None
-            ),
+            full_name=dict(),
             shell=dict(
-                required=False,
-                default=None,
                 choices=['none', 'bash', 'tmsh']
             ),
             update_password=dict(
-                required=False,
                 default='always',
                 choices=['always', 'on_create']
             )

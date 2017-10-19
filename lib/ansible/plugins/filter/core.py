@@ -125,7 +125,7 @@ def to_bool(a):
     return False
 
 
-def to_datetime(string, format="%Y-%d-%m %H:%M:%S"):
+def to_datetime(string, format="%Y-%m-%d %H:%M:%S"):
     return datetime.strptime(string, format)
 
 
@@ -205,7 +205,7 @@ def regex_search(value, regex, *args, **kwargs):
 
 def ternary(value, true_val, false_val):
     '''  value ? true_val : false_val '''
-    if value:
+    if bool(value):
         return true_val
     else:
         return false_val
@@ -262,7 +262,7 @@ def get_hash(data, hashtype='sha1'):
     except:
         return None
 
-    h.update(to_bytes(data, errors='surrogate_then_strict'))
+    h.update(to_bytes(data, errors='surrogate_or_strict'))
     return h.hexdigest()
 
 
@@ -453,11 +453,11 @@ def do_groupby(environment, value, attribute):
 
 
 def b64encode(string):
-    return to_text(base64.b64encode(to_bytes(string, errors='surrogate_then_strict')))
+    return to_text(base64.b64encode(to_bytes(string, errors='surrogate_or_strict')))
 
 
 def b64decode(string):
-    return to_text(base64.b64decode(to_bytes(string, errors='surrogate_then_strict')))
+    return to_text(base64.b64decode(to_bytes(string, errors='surrogate_or_strict')))
 
 
 class FilterModule(object):

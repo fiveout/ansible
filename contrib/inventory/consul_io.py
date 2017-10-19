@@ -133,7 +133,11 @@ import os
 import re
 import argparse
 import sys
-import ConfigParser
+
+try:
+    import configparser
+except ImportError:
+    import ConfigParser as configparser
 
 
 def get_log_filename():
@@ -284,7 +288,7 @@ class ConsulInventory(object):
 
     def load_node_metadata_from_kv(self, node_data):
         ''' load the json dict at the metadata path defined by the kv_metadata value
-            and the node name add each entry in the dictionary to the the node's
+            and the node name add each entry in the dictionary to the node's
             metadata '''
         node = node_data['Node']
         if self.config.has_config('kv_metadata'):
@@ -421,7 +425,7 @@ class ConsulConfig(dict):
 
     def read_settings(self):
         ''' Reads the settings from the consul_io.ini file (or consul.ini for backwards compatibility)'''
-        config = ConfigParser.SafeConfigParser()
+        config = configparser.SafeConfigParser()
         if os.path.isfile(os.path.dirname(os.path.realpath(__file__)) + '/consul_io.ini'):
             config.read(os.path.dirname(os.path.realpath(__file__)) + '/consul_io.ini')
         else:
@@ -469,7 +473,7 @@ class ConsulConfig(dict):
         scheme = 'http'
 
         if hasattr(self, 'url'):
-            from urlparse import urlparse
+            from ansible.module_utils.six.moves.urllib.parse import urlparse
             o = urlparse(self.url)
             if o.hostname:
                 host = o.hostname

@@ -1,42 +1,74 @@
 # (c) 2015, Jonathan Davila <jdavila(at)ansible.com>
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
-#
-# USAGE: {{ lookup('hashi_vault', 'secret=secret/hello:value token=c975b780-d1be-8016-866b-01d0f9b688a5 url=http://myvault:8200')}}
-#
-# To authenticate with a username/password against the LDAP auth backend in Vault:
-#
-# USAGE: {{ lookup('hashi_vault', 'secret=secret/hello:value auth_method=ldap mount_point=ldap username=myuser password=mypassword url=http://myvault:8200')}}
-#
-# The mount_point param defaults to ldap, so is only required if you have a custom mount point.
-#
-# You can skip setting the url if you set the VAULT_ADDR environment variable
-# or if you want it to default to localhost:8200
-#
-# NOTE: Due to a current limitation in the HVAC library there won't
-# necessarily be an error if a bad endpoint is specified.
-#
-# Requires hvac library. Install with pip.
+# (c) 2017 Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
+DOCUMENTATION = """
+  lookup: hashi_vault
+  author: Jonathan Davila <jdavila(at)ansible.com>
+  version_added: "2.0"
+  short_description: retrieve secrets from HasihCorp's vault
+  requirements:
+    - hvac (python library)
+  description:
+    - retrieve secrets from HasihCorp's vault
+  notes:
+    - Due to a current limitation in the HVAC library there won't necessarily be an error if a bad endpoint is specified.
+  options:
+    secret:
+      description: query you are making
+      required: True
+    token:
+      description: vault token
+      env:
+        - name: VAULT_TOKEN
+    url:
+      description: url to vault service
+      env:
+        - name: VAULT_ADDR
+      default: 'http://127.0.0.1:8200'
+    username:
+      description: authentication user name
+    password:
+      description: authentication password
+    auth_method:
+      description: authentication method used
+    mount_point:
+      description: vault mount point, only required if you have a custom mount point
+      default: ldap
+    cacert:
+      description: path to certificate to use for authentication
+    validate_certs:
+      description: controls verification and validation of SSL certificates, mostly you only want to turn off with self signed ones.
+      type: boolean
+      default: True
+"""
+
+EXAMPLES = """
+- debug: msg="{{ lookup('hashi_vault', 'secret=secret/hello:value token=c975b780-d1be-8016-866b-01d0f9b688a5 url=http://myvault:8200')}}"
+
+- name: Vault that requires authentication via ldap
+  debug: msg="{{ lookup('hashi_vault', 'secret=secret/hello:value auth_method=ldap mount_point=ldap username=myuser password=mypas url=http://myvault:8200')}}"
+
+- name: Using an ssl vault
+  debug: msg="{{ lookup('hashi_vault', 'secret=secret/hola:value token=c975b780-d1be-8016-866b-01d0f9b688a5 url=https://myvault:8200 validate_certs=False')}}"
+
+- name: using certificate auth
+  debug: msg="{{ lookup('hashi_vault', 'secret=secret/hi:value token=xxxx-xxx-xxx url=https://myvault:8200 validate_certs=True cacert=/cacert/path/ca.pem')}}"
+"""
+
+RETURN = """
+_raw:
+  description:
+    - secrets(s) requested
+"""
+
 import os
 
 from ansible.errors import AnsibleError
+from ansible.module_utils.parsing.convert_bool import boolean
 from ansible.plugins.lookup import LookupBase
 
 HAS_HVAC = False
@@ -45,6 +77,7 @@ try:
     HAS_HVAC = True
 except ImportError:
     HAS_HVAC = False
+
 
 ANSIBLE_HASHI_VAULT_ADDR = 'http://127.0.0.1:8200'
 
@@ -56,10 +89,6 @@ class HashiVault:
     def __init__(self, **kwargs):
 
         self.url = kwargs.get('url', ANSIBLE_HASHI_VAULT_ADDR)
-
-        self.token = kwargs.get('token')
-        if self.token is None:
-            raise AnsibleError("No Hashicorp Vault Token specified for hash_vault lookup")
 
         # split secret arg, which has format 'secret/hello:value' into secret='secret/hello' and secret_field='value'
         s = kwargs.get('secret')
@@ -101,7 +130,9 @@ class HashiVault:
             if self.token is None:
                 raise AnsibleError("No Vault Token specified")
 
-            self.client = hvac.Client(url=self.url, token=self.token)
+            self.verify = self.boolean_or_cacert(kwargs.get('validate_certs', True), kwargs.get('cacert', ''))
+
+            self.client = hvac.Client(url=self.url, token=self.token, verify=self.verify)
 
         if not self.client.is_authenticated():
             raise AnsibleError("Invalid Hashicorp Vault Token Specified for hashi_vault lookup")
@@ -134,6 +165,17 @@ class HashiVault:
             mount_point = 'ldap'
 
         self.client.auth_ldap(username, password, mount_point)
+
+    def boolean_or_cacert(self, validate_certs, cacert):
+        validate_certs = boolean(validate_certs, strict=False)
+        '''' return a bool or cacert '''
+        if validate_certs is True:
+            if cacert != '':
+                return cacert
+            else:
+                return True
+        else:
+            return False
 
 
 class LookupModule(LookupBase):

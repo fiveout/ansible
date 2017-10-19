@@ -38,45 +38,36 @@ JSON_ACTIONS = frozenset(['merge', 'override', 'update'])
 FORMATS = frozenset(['xml', 'text', 'json'])
 CONFIG_FORMATS = frozenset(['xml', 'text', 'json', 'set'])
 
-junos_argument_spec = {
+junos_provider_spec = {
     'host': dict(),
     'port': dict(type='int'),
     'username': dict(fallback=(env_fallback, ['ANSIBLE_NET_USERNAME'])),
     'password': dict(fallback=(env_fallback, ['ANSIBLE_NET_PASSWORD']), no_log=True),
     'ssh_keyfile': dict(fallback=(env_fallback, ['ANSIBLE_NET_SSH_KEYFILE']), type='path'),
     'timeout': dict(type='int'),
-    'provider': dict(type='dict'),
     'transport': dict()
 }
-
-# Add argument's default value here
-ARGS_DEFAULT_VALUE = {
-    'timeout': 10
+junos_argument_spec = {
+    'provider': dict(type='dict', options=junos_provider_spec),
 }
+junos_top_spec = {
+    'host': dict(removed_in_version=2.9),
+    'port': dict(removed_in_version=2.9, type='int'),
+    'username': dict(removed_in_version=2.9),
+    'password': dict(removed_in_version=2.9, no_log=True),
+    'ssh_keyfile': dict(removed_in_version=2.9, type='path'),
+    'timeout': dict(removed_in_version=2.9, type='int'),
+    'transport': dict(removed_in_version=2.9)
+}
+junos_argument_spec.update(junos_top_spec)
 
 
-def get_argspec():
-    return junos_argument_spec
+def get_provider_argspec():
+    return junos_provider_spec
 
 
 def check_args(module, warnings):
-    provider = module.params['provider'] or {}
-    for key in junos_argument_spec:
-        if key not in ('provider',) and module.params[key]:
-            warnings.append('argument %s has been deprecated and will be '
-                            'removed in a future version' % key)
-
-    # set argument's default value if not provided in input
-    # This is done to avoid unwanted argument deprecation warning
-    # in case argument is not given as input (outside provider).
-    for key in ARGS_DEFAULT_VALUE:
-        if not module.params.get(key, None):
-            module.params[key] = ARGS_DEFAULT_VALUE[key]
-
-    if provider:
-        for param in ('password',):
-            if provider.get(param):
-                module.no_log_values.update(return_values(provider[param]))
+    pass
 
 
 def _validate_rollback_id(module, value):
@@ -126,7 +117,7 @@ def load_configuration(module, candidate=None, action='merge', rollback=None, fo
             if format == 'xml':
                 cfg.append(fromstring(candidate))
             else:
-                cfg.text = to_text(candidate, encoding='latin1')
+                cfg.text = to_text(candidate, encoding='latin-1')
         else:
             cfg.append(candidate)
     return send_request(module, obj)
@@ -183,46 +174,46 @@ def locked_config(module):
         unlock_configuration(module)
 
 
-def get_diff(module):
+def get_diff(module, rollback='0'):
 
-    reply = get_configuration(module, compare=True, format='text')
+    reply = get_configuration(module, compare=True, format='text', rollback=rollback)
+    # if warning is received from device diff is empty.
+    if isinstance(reply, list):
+        return None
+
     output = reply.find('.//configuration-output')
     if output is not None:
-        return to_text(output.text, encoding='latin1').strip()
+        return to_text(output.text, encoding='latin-1').strip()
 
 
-def load_config(module, candidate, warnings, action='merge', commit=False, format='xml',
-                comment=None, confirm=False, confirm_timeout=None):
+def load_config(module, candidate, warnings, action='merge', format='xml'):
 
     if not candidate:
         return
 
-    with locked_config(module):
-        if isinstance(candidate, list):
-            candidate = '\n'.join(candidate)
+    if isinstance(candidate, list):
+        candidate = '\n'.join(candidate)
 
-        reply = load_configuration(module, candidate, action=action, format=format)
-        if isinstance(reply, list):
-            warnings.extend(reply)
+    reply = load_configuration(module, candidate, action=action, format=format)
+    if isinstance(reply, list):
+        warnings.extend(reply)
 
-        validate(module)
-        diff = get_diff(module)
+    validate(module)
 
-        if diff:
-            if commit:
-                commit_configuration(module, confirm=confirm, comment=comment,
-                                     confirm_timeout=confirm_timeout)
-            else:
-                discard_changes(module)
-
-        return diff
+    return get_diff(module)
 
 
 def get_param(module, key):
-    return module.params[key] or module.params['provider'].get(key)
+    if module.params.get(key):
+        value = module.params[key]
+    elif module.params.get('provider'):
+        value = module.params['provider'].get(key)
+    else:
+        value = None
+    return value
 
 
-def map_params_to_obj(module, param_to_xpath_map):
+def map_params_to_obj(module, param_to_xpath_map, param=None):
     """
     Creates a new dictionary with key as xpath corresponding
     to param and value is a list of dict with metadata and values for
@@ -243,12 +234,15 @@ def map_params_to_obj(module, param_to_xpath_map):
     :param param_to_xpath_map: Modules params to xpath map
     :return: obj
     """
+    if not param:
+        param = module.params
+
     obj = collections.OrderedDict()
     for key, attribute in param_to_xpath_map.items():
-        if key in module.params:
+        if key in param:
             is_attribute_dict = False
 
-            value = module.params[key]
+            value = param[key]
             if not isinstance(value, (list, tuple)):
                 value = [value]
 
@@ -273,9 +267,12 @@ def map_params_to_obj(module, param_to_xpath_map):
     return obj
 
 
-def map_obj_to_ele(module, want, top, value_map=None):
+def map_obj_to_ele(module, want, top, value_map=None, param=None):
     if not HAS_LXML:
         module.fail_json(msg='lxml is not installed.')
+
+    if not param:
+        param = module.params
 
     root = Element('root')
     top_ele = top.split('/')
@@ -285,96 +282,95 @@ def map_obj_to_ele(module, want, top, value_map=None):
         for item in top_ele[1:-1]:
             ele = SubElement(ele, item)
     container = ele
-    state = module.params.get('state')
-    active = module.params.get('active')
+    state = param.get('state')
+    active = param.get('active')
     if active:
         oper = 'active'
     else:
         oper = 'inactive'
 
     # build xml subtree
-    for obj in want:
-        if container.tag != top_ele[-1]:
-            node = SubElement(container, top_ele[-1])
-        else:
-            node = container
+    if container.tag != top_ele[-1]:
+        node = SubElement(container, top_ele[-1])
+    else:
+        node = container
 
-        for fxpath, attributes in obj.items():
-            for attr in attributes:
-                tag_only = attr.get('tag_only', False)
-                leaf_only = attr.get('leaf_only', False)
-                is_value = attr.get('value_req', False)
-                is_key = attr.get('is_key', False)
-                value = attr.get('value')
-                field_top = attr.get('top')
-                # operation 'delete' is added as element attribute
-                # only if it is key or leaf only node
-                if state == 'absent' and not (is_key or leaf_only):
-                    continue
+    for fxpath, attributes in want.items():
+        for attr in attributes:
+            tag_only = attr.get('tag_only', False)
+            leaf_only = attr.get('leaf_only', False)
+            value_req = attr.get('value_req', False)
+            is_key = attr.get('is_key', False)
+            parent_attrib = attr.get('parent_attrib', True)
+            value = attr.get('value')
+            field_top = attr.get('top')
 
-                # for tag only node if value is false continue to next attr
-                if tag_only and not value:
-                    continue
+            # operation 'delete' is added as element attribute
+            # only if it is key or leaf only node
+            if state == 'absent' and not (is_key or leaf_only):
+                continue
 
-                # convert param value to device specific value
-                if value_map and fxpath in value_map:
-                    value = value_map[fxpath].get(value)
+            # convert param value to device specific value
+            if value_map and fxpath in value_map:
+                value = value_map[fxpath].get(value)
 
-                if value or tag_only or leaf_only:
-                    ele = node
-                    if field_top:
-                        # eg: top = 'system/syslog/file'
-                        #     field_top = 'system/syslog/file/contents'
-                        # <file>
-                        #   <name>test</name>
-                        #   <contents>
-                        #   </contents>
-                        # </file>
-                        ele_list = root.xpath(top + '/' + field_top)
+            if (value is not None) or tag_only or leaf_only:
+                ele = node
+                if field_top:
+                    # eg: top = 'system/syslog/file'
+                    #     field_top = 'system/syslog/file/contents'
+                    # <file>
+                    #   <name>test</name>
+                    #   <contents>
+                    #   </contents>
+                    # </file>
+                    ele_list = root.xpath(top + '/' + field_top)
 
-                        if not len(ele_list):
-                            fields = field_top.split('/')
-                            ele = node
-                            for item in fields:
-                                inner_ele = root.xpath(top + '/' + item)
-                                if len(inner_ele):
-                                    ele = inner_ele[0]
-                                else:
-                                    ele = SubElement(ele, item)
-                        else:
-                            ele = ele_list[0]
+                    if not len(ele_list):
+                        fields = field_top.split('/')
+                        ele = node
+                        for item in fields:
+                            inner_ele = root.xpath(top + '/' + item)
+                            if len(inner_ele):
+                                ele = inner_ele[0]
+                            else:
+                                ele = SubElement(ele, item)
+                    else:
+                        ele = ele_list[0]
 
+                if value is not None and not isinstance(value, bool):
+                    value = to_text(value, errors='surrogate_then_replace')
+
+                if fxpath:
                     tags = fxpath.split('/')
-                    if value:
-                        value = to_text(value, errors='surrogate_then_replace')
-
                     for item in tags:
                         ele = SubElement(ele, item)
 
-                    if tag_only:
-                        if state == 'present':
-                            if not value:
-                                # if value of tag_only node is false, delete the node
-                                ele.set('delete', 'delete')
-
-                    elif leaf_only:
-                        if state == 'present':
-                            ele.set(oper, oper)
-                            ele.text = value
-                        else:
+                if tag_only:
+                    if state == 'present':
+                        if not value:
+                            # if value of tag_only node is false, delete the node
                             ele.set('delete', 'delete')
-                            # Add value of leaf node if required while deleting.
-                            # in some cases if value is present while deleting, it
-                            # can result in error, hence the check
-                            if is_value:
-                                ele.text = value
-                            if is_key:
-                                par = ele.getparent()
-                                par.set('delete', 'delete')
-                    else:
-                        ele.text = value
-                        par = ele.getparent()
 
+                elif leaf_only:
+                    if state == 'present':
+                        ele.set(oper, oper)
+                        ele.text = value
+                    else:
+                        ele.set('delete', 'delete')
+                        # Add value of leaf node if required while deleting.
+                        # in some cases if value is present while deleting, it
+                        # can result in error, hence the check
+                        if value_req:
+                            ele.text = value
+                        if is_key:
+                            par = ele.getparent()
+                            par.set('delete', 'delete')
+                else:
+                    ele.text = value
+                    par = ele.getparent()
+
+                    if parent_attrib:
                         if state == 'present':
                             # set replace attribute at parent node
                             if not par.attrib.get('replace'):
@@ -387,3 +383,14 @@ def map_obj_to_ele(module, want, top, value_map=None):
                             par.set('delete', 'delete')
 
     return root.getchildren()[0]
+
+
+def to_param_list(module):
+    aggregate = module.params.get('aggregate')
+    if aggregate:
+        if isinstance(aggregate, dict):
+            return [aggregate]
+        else:
+            return aggregate
+    else:
+        return [module.params]

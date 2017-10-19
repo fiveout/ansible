@@ -2,23 +2,13 @@
 # -*- coding: utf-8 -*-
 
 # (c) 2012, Michael DeHaan <michael.dehaan@gmail.com>
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'metadata_version': '1.0',
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['stableinterface'],
                     'supported_by': 'core'}
 
@@ -622,7 +612,7 @@ class LinuxService(Service):
         # if we have decided the service is managed by upstart, we check for some additional output...
         if self.svc_initctl and self.running is None:
             # check the job status by upstart response
-            initctl_rc, initctl_status_stdout, initctl_status_stderr = self.execute_command("%s status %s" % (self.svc_initctl, self.name))
+            initctl_rc, initctl_status_stdout, initctl_status_stderr = self.execute_command("%s status %s %s" % (self.svc_initctl, self.name, self.arguments ))
             if "stop/waiting" in initctl_status_stdout:
                 self.running = False
             elif "start/running" in initctl_status_stdout:
@@ -1398,20 +1388,21 @@ class SunOSService(Service):
         elif (not self.enable) and (not startup_enabled):
             return
 
-        # Mark service as started or stopped (this will have the side effect of
-        # actually stopping or starting the service)
-        if self.enable:
-            subcmd = "enable -rs"
-        else:
-            subcmd = "disable -s"
-
-        rc, stdout, stderr = self.execute_command("%s %s %s" % (self.svcadm_cmd, subcmd, self.name))
-
-        if rc != 0:
-            if stderr:
-                self.module.fail_json(msg=stderr)
+        if not self.module.check_mode:
+            # Mark service as started or stopped (this will have the side effect of
+            # actually stopping or starting the service)
+            if self.enable:
+                subcmd = "enable -rs"
             else:
-                self.module.fail_json(msg=stdout)
+                subcmd = "disable -s"
+
+            rc, stdout, stderr = self.execute_command("%s %s %s" % (self.svcadm_cmd, subcmd, self.name))
+
+            if rc != 0:
+                if stderr:
+                    self.module.fail_json(msg=stderr)
+                else:
+                    self.module.fail_json(msg=stdout)
 
         self.changed = True
 

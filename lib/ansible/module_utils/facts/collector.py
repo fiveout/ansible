@@ -111,16 +111,31 @@ def get_collector_names(valid_subsets=None,
     additional_subsets = set()
     exclude_subsets = set()
 
-    for subset in gather_subset:
-        subset_id = subset
+    # total always starts with the min set, then
+    # adds of the additions in gather_subset, then
+    # excludes all of the excludes, then add any explicitly
+    # requested subsets.
+    gather_subset_with_min = ['min']
+    gather_subset_with_min.extend(gather_subset)
 
+    # subsets we mention in gather_subset explicitly, except for 'all'/'min'
+    explicitly_added = set()
+
+    for subset in gather_subset_with_min:
+        subset_id = subset
+        if subset_id == 'min':
+            additional_subsets.update(minimal_gather_subset)
+            continue
         if subset_id == 'all':
             additional_subsets.update(valid_subsets)
             continue
         if subset_id.startswith('!'):
             subset = subset[1:]
+            if subset == 'min':
+                exclude_subsets.update(minimal_gather_subset)
+                continue
             if subset == 'all':
-                exclude_subsets.update(valid_subsets)
+                exclude_subsets.update(valid_subsets - minimal_gather_subset)
                 continue
             exclude = True
         else:
@@ -137,14 +152,13 @@ def get_collector_names(valid_subsets=None,
                 raise TypeError("Bad subset '%s' given to Ansible. gather_subset options allowed: all, %s" %
                                 (subset, ", ".join(sorted(valid_subsets))))
 
+            explicitly_added.add(subset)
             additional_subsets.add(subset)
 
     if not additional_subsets:
         additional_subsets.update(valid_subsets)
 
-    additional_subsets.difference_update(exclude_subsets)
-
-    additional_subsets.update(minimal_gather_subset)
+    additional_subsets.difference_update(exclude_subsets - explicitly_added)
 
     return additional_subsets
 
@@ -187,6 +201,28 @@ def build_fact_id_to_collector_map(collectors_for_platform):
             aliases_map[primary_name].add(fact_id)
 
     return fact_id_to_collector_map, aliases_map
+
+
+def select_collector_classes(collector_names, all_fact_subsets, all_collector_classes):
+    # TODO: can be a set()
+    seen_collector_classes = []
+
+    selected_collector_classes = []
+
+    for candidate_collector_class in all_collector_classes:
+        candidate_collector_name = candidate_collector_class.name
+
+        if candidate_collector_name not in collector_names:
+            continue
+
+        collector_classes = all_fact_subsets.get(candidate_collector_name, [])
+
+        for collector_class in collector_classes:
+            if collector_class not in seen_collector_classes:
+                selected_collector_classes.append(collector_class)
+                seen_collector_classes.append(collector_class)
+
+    return selected_collector_classes
 
 
 def collector_classes_from_gather_subset(all_collector_classes=None,
@@ -234,19 +270,8 @@ def collector_classes_from_gather_subset(all_collector_classes=None,
                                           aliases_map=aliases_map,
                                           platform_info=platform_info)
 
-    # TODO: can be a set()
-    seen_collector_classes = []
-
-    selected_collector_classes = []
-
-    for collector_name in collector_names:
-        collector_classes = all_fact_subsets.get(collector_name, [])
-
-        # TODO? log/warn if we dont find an implementation of a fact_id?
-
-        for collector_class in collector_classes:
-            if collector_class not in seen_collector_classes:
-                selected_collector_classes.append(collector_class)
-                seen_collector_classes.append(collector_class)
+    selected_collector_classes = select_collector_classes(collector_names,
+                                                          all_fact_subsets,
+                                                          all_collector_classes)
 
     return selected_collector_classes

@@ -3,6 +3,7 @@
 from __future__ import absolute_import, print_function
 
 import errno
+import inspect
 import os
 import pipes
 import pkgutil
@@ -11,6 +12,12 @@ import subprocess
 import re
 import sys
 import time
+
+try:
+    from abc import ABC
+except ImportError:
+    from abc import ABCMeta
+    ABC = ABCMeta('ABC', (), {})
 
 
 def is_shippable():
@@ -81,7 +88,7 @@ def find_executable(executable, cwd=None, path=None, required=True):
 
 
 def run_command(args, cmd, capture=False, env=None, data=None, cwd=None, always=False, stdin=None, stdout=None,
-                cmd_verbosity=1):
+                cmd_verbosity=1, str_errors='strict'):
     """
     :type args: CommonConfig
     :type cmd: collections.Iterable[str]
@@ -93,15 +100,16 @@ def run_command(args, cmd, capture=False, env=None, data=None, cwd=None, always=
     :type stdin: file | None
     :type stdout: file | None
     :type cmd_verbosity: int
+    :type str_errors: str
     :rtype: str | None, str | None
     """
     explain = args.explain and not always
     return raw_command(cmd, capture=capture, env=env, data=data, cwd=cwd, explain=explain, stdin=stdin, stdout=stdout,
-                       cmd_verbosity=cmd_verbosity)
+                       cmd_verbosity=cmd_verbosity, str_errors=str_errors)
 
 
 def raw_command(cmd, capture=False, env=None, data=None, cwd=None, explain=False, stdin=None, stdout=None,
-                cmd_verbosity=1):
+                cmd_verbosity=1, str_errors='strict'):
     """
     :type cmd: collections.Iterable[str]
     :type capture: bool
@@ -112,6 +120,7 @@ def raw_command(cmd, capture=False, env=None, data=None, cwd=None, explain=False
     :type stdin: file | None
     :type stdout: file | None
     :type cmd_verbosity: int
+    :type str_errors: str
     :rtype: str | None, str | None
     """
     if not cwd:
@@ -170,8 +179,8 @@ def raw_command(cmd, capture=False, env=None, data=None, cwd=None, explain=False
         encoding = 'utf-8'
         data_bytes = data.encode(encoding) if data else None
         stdout_bytes, stderr_bytes = process.communicate(data_bytes)
-        stdout_text = stdout_bytes.decode(encoding) if stdout_bytes else u''
-        stderr_text = stderr_bytes.decode(encoding) if stderr_bytes else u''
+        stdout_text = stdout_bytes.decode(encoding, str_errors) if stdout_bytes else u''
+        stderr_text = stderr_bytes.decode(encoding, str_errors) if stderr_bytes else u''
     else:
         process.wait()
         stdout_text, stderr_text = None, None
@@ -200,7 +209,11 @@ def common_environment():
 
     optional = (
         'HTTPTESTER',
-        'SSH_AUTH_SOCK'
+        'LD_LIBRARY_PATH',
+        'SSH_AUTH_SOCK',
+        # MacOS High Sierra Compatibility
+        # http://sealiesoftware.com/blog/archive/2017/6/5/Objective-C_and_fork_in_macOS_1013.html
+        'OBJC_DISABLE_INITIALIZE_FORK_SAFETY',
     )
 
     env.update(pass_vars(required=required, optional=optional))
@@ -367,6 +380,9 @@ class Display(object):
             message = message.replace(self.clear, color)
             message = '%s%s%s' % (color, message, self.clear)
 
+        if sys.version_info[0] == 2 and isinstance(message, type(u'')):
+            message = message.encode('utf-8')
+
         print(message, file=fd)
         fd.flush()
 
@@ -473,7 +489,8 @@ def get_subclasses(class_type):
 
         for child in parent.__subclasses__():
             if child not in subclasses:
-                subclasses.add(child)
+                if not inspect.isabstract(child):
+                    subclasses.add(child)
                 queue.append(child)
 
     return subclasses

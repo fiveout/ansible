@@ -15,8 +15,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 #############################################
-'''
-DOCUMENTATION:
+from __future__ import (absolute_import, division, print_function)
+__metaclass__ = type
+
+DOCUMENTATION = '''
     vars: host_group_vars
     version_added: "2.4"
     short_description: In charge of loading group_vars and host_vars
@@ -27,15 +29,24 @@ DOCUMENTATION:
         - Only applies to inventory sources that are existing paths.
     notes:
         - It takes the place of the previously hardcoded group_vars/host_vars loading.
+    options:
+      _valid_extensions:
+        default: [".yml", ".yaml", ".json"]
+        description:
+          - "Check all of these extensions when looking for 'variable' files which should be YAML or JSON or vaulted versions of these."
+          - 'This affects vars_files, include_vars, inventory and vars plugins among others.'
+        env:
+          - name: ANSIBLE_YAML_FILENAME_EXT
+        ini:
+          - section: yaml_valid_extensions
+            key: defaults
+        type: list
 '''
-
-from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
 
 import os
 from ansible import constants as C
 from ansible.errors import AnsibleParserError
-from ansible.module_utils._text import to_bytes, to_text
+from ansible.module_utils._text import to_bytes, to_native, to_text
 from ansible.plugins.vars import BaseVarsPlugin
 from ansible.inventory.host import Host
 from ansible.inventory.group import Group
@@ -87,7 +98,7 @@ class VarsModule(BaseVarsPlugin):
                         data = combine_vars(data, new_data)
 
             except Exception as e:
-                raise AnsibleParserError(to_text(e))
+                raise AnsibleParserError(to_native(e))
         return data
 
     def _find_vars_files(self, path, name):
@@ -122,7 +133,7 @@ class VarsModule(BaseVarsPlugin):
 
         found = []
         for spath in os.listdir(path):
-            if not spath.startswith(b'.') and not spath.endswith(b'~'):  # skip hidden and backups
+            if not spath.startswith(u'.') and not spath.endswith(u'~'):  # skip hidden and backups
 
                 ext = os.path.splitext(spath)[-1]
                 full_spath = os.path.join(path, spath)

@@ -36,6 +36,10 @@ $result = @{
     wait = $wait
 }
 
+if ($msg.Length -gt 255) {
+    Fail-Json -obj $result -message "msg length must be less than 256 characters, current length: $($msg.Length)"
+}
+
 $msg_args = @($to, "/TIME:$display_seconds")
 
 if ($wait) {
@@ -56,7 +60,7 @@ $result.runtime_seconds = $stopwatch.Elapsed.TotalSeconds
 $result.sent_localtime = $endsend_at.Trim()
 
 if ($result.rc -ne 0 ) {
-    Fail-Json $result "$output"
+    Fail-Json -obj $result -message "$output"
 }
   
 Exit-Json $result

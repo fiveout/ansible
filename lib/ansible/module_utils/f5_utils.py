@@ -134,6 +134,28 @@ def fq_list_names(partition, list_names):
     return map(lambda x: fq_name(partition, x), list_names)
 
 
+def to_commands(module, commands):
+    spec = {
+        'command': dict(key=True),
+        'prompt': dict(),
+        'answer': dict()
+    }
+    transform = ComplexList(spec, module)
+    return transform(commands)
+
+
+def run_commands(module, commands, check_rc=True):
+    responses = list()
+    commands = to_commands(module, to_list(commands))
+    for cmd in commands:
+        cmd = module.jsonify(cmd)
+        rc, out, err = exec_command(module, cmd)
+        if check_rc and rc != 0:
+            module.fail_json(msg=to_text(err, errors='surrogate_then_replace'), rc=rc)
+        responses.append(to_text(out, errors='surrogate_then_replace'))
+    return responses
+
+
 # New style
 
 from abc import ABCMeta, abstractproperty
@@ -146,14 +168,17 @@ try:
     from f5.bigiq import ManagementRoot as BigIqMgmt
 
     from f5.iworkflow import ManagementRoot as iWorkflowMgmt
-    from icontrol.session import iControlUnexpectedHTTPError
+    from icontrol.exceptions import iControlUnexpectedHTTPError
     HAS_F5SDK = True
 except ImportError:
     HAS_F5SDK = False
 
 
-from ansible.module_utils.basic import *
+from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.six import iteritems, with_metaclass
+from ansible.module_utils.network_common import to_list, ComplexList
+from ansible.module_utils.connection import exec_command
+from ansible.module_utils._text import to_text
 
 
 F5_COMMON_ARGS = dict(
@@ -200,7 +225,7 @@ F5_COMMON_ARGS = dict(
 class AnsibleF5Client(object):
     def __init__(self, argument_spec=None, supports_check_mode=False,
                  mutually_exclusive=None, required_together=None,
-                 required_if=None, required_one_of=None,
+                 required_if=None, required_one_of=None, add_file_common_args=False,
                  f5_product_name='bigip'):
 
         self.f5_product_name = f5_product_name
@@ -225,18 +250,20 @@ class AnsibleF5Client(object):
             mutually_exclusive=mutually_exclusive_params,
             required_together=required_together_params,
             required_if=required_if,
-            required_one_of=required_one_of
+            required_one_of=required_one_of,
+            add_file_common_args=add_file_common_args
         )
 
         self.check_mode = self.module.check_mode
         self._connect_params = self._get_connect_params()
 
-        try:
-            self.api = self._get_mgmt_root(
-                f5_product_name, **self._connect_params
-            )
-        except iControlUnexpectedHTTPError as exc:
-            self.fail(str(exc))
+        if 'transport' not in self.module.params or self.module.params['transport'] != 'cli':
+            try:
+                self.api = self._get_mgmt_root(
+                    f5_product_name, **self._connect_params
+                )
+            except iControlUnexpectedHTTPError as exc:
+                self.fail(str(exc))
 
     def fail(self, msg):
         self.module.fail_json(msg=msg)

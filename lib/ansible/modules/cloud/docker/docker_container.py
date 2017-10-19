@@ -1,23 +1,13 @@
 #!/usr/bin/python
 #
 # Copyright 2016 Red Hat | Ansible
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'metadata_version': '1.0',
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['preview'],
                     'supported_by': 'community'}
 
@@ -681,16 +671,20 @@ docker_container:
     }'
 '''
 
+import os
 import re
+import shlex
 
-from ansible.module_utils.docker_common import *
+from ansible.module_utils.basic import human_to_bytes
+from ansible.module_utils.docker_common import HAS_DOCKER_PY_2, AnsibleDockerClient, DockerBaseClass
+from ansible.module_utils.six import string_types
 
 try:
     from docker import utils
     if HAS_DOCKER_PY_2:
-        from docker.types import Ulimit
+        from docker.types import Ulimit, LogConfig
     else:
-        from docker.utils.types import Ulimit
+        from docker.utils.types import Ulimit, LogConfig
 except:
     # missing docker-py handled in ansible.module_utils.docker
     pass
@@ -704,6 +698,7 @@ REQUIRES_CONVERSION_TO_BYTES = [
 ]
 
 VOLUME_PERMISSIONS = ('rw', 'ro', 'z', 'Z')
+
 
 class TaskParameters(DockerBaseClass):
     '''
@@ -860,7 +855,7 @@ class TaskParameters(DockerBaseClass):
             mem_limit='memory',
             mem_reservation='mem_reservation',
             memswap_limit='memory_swap',
-            kernel_memory='kernel_memory'
+            kernel_memory='kernel_memory',
         )
         result = dict()
         for key, value in update_parameters.items():
@@ -971,6 +966,7 @@ class TaskParameters(DockerBaseClass):
             memswap_limit='memory_swap',
             mem_swappiness='memory_swappiness',
             oom_score_adj='oom_score_adj',
+            oom_kill_disable='oom_killer',
             shm_size='shm_size',
             group_add='groups',
             devices='devices',
@@ -1087,14 +1083,14 @@ class TaskParameters(DockerBaseClass):
             # Any published port should also be exposed
             for publish_port in published_ports:
                 match = False
-                if isinstance(publish_port, basestring) and '/' in publish_port:
+                if isinstance(publish_port, string_types) and '/' in publish_port:
                     port, protocol = publish_port.split('/')
                     port = int(port)
                 else:
                     protocol = 'tcp'
                     port = int(publish_port)
                 for exposed_port in exposed:
-                    if isinstance(exposed_port[0], basestring) and '-' in exposed_port[0]:
+                    if isinstance(exposed_port[0], string_types) and '-' in exposed_port[0]:
                         start_port, end_port = exposed_port[0].split('-')
                         if int(start_port) <= port <= int(end_port):
                             match = True
@@ -1293,7 +1289,6 @@ class Container(DockerBaseClass):
         # Map parameters to container inspect results
         config_mapping = dict(
             auto_remove=host_config.get('AutoRemove'),
-            image=config.get('Image'),
             expected_cmd=config.get('Cmd'),
             hostname=config.get('Hostname'),
             user=config.get('User'),
@@ -1443,6 +1438,7 @@ class Container(DockerBaseClass):
             memory_reservation=host_config.get('MemoryReservation'),
             memory_swap=host_config.get('MemorySwap'),
             oom_score_adj=host_config.get('OomScoreAdj'),
+            oom_killer=host_config.get('OomKillDisable'),
         )
 
         differences = []
@@ -1961,7 +1957,14 @@ class ContainerManager(DockerBaseClass):
 
             if not self.parameters.detach:
                 status = self.client.wait(container_id)
-                output = self.client.logs(container_id, stdout=True, stderr=True, stream=False, timestamps=False)
+                config = self.client.inspect_container(container_id)
+                logging_driver = config['HostConfig']['LogConfig']['Type']
+
+                if logging_driver == 'json-file' or logging_driver == 'journald':
+                    output = self.client.logs(container_id, stdout=True, stderr=True, stream=False, timestamps=False)
+                else:
+                    output = "Result logged using `%s` driver" % logging_driver
+
                 if status != 0:
                     self.fail(output, status=status)
                 if self.parameters.cleanup:
@@ -2125,8 +2128,6 @@ def main():
     cm = ContainerManager(client)
     client.module.exit_json(**cm.results)
 
-# import module snippets
-from ansible.module_utils.basic import *
 
 if __name__ == '__main__':
     main()

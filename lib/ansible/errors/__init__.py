@@ -20,6 +20,8 @@ from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
 from collections import Sequence
+import traceback
+import sys
 
 from ansible.errors.yaml_strings import (
     YAML_COMMON_DICT_ERROR,
@@ -65,8 +67,8 @@ class AnsibleError(Exception):
             self.message = '%s' % to_native(message)
         if orig_exc:
             self.orig_exc = orig_exc
-            self.message += '\nexception type: %s' % to_native(type(orig_exc))
-            self.message += '\nexception: %s' % to_native(orig_exc)
+
+        self.tb = ''.join(traceback.format_tb(sys.exc_info()[2]))
 
     def __str__(self):
         return self.message

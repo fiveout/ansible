@@ -25,7 +25,7 @@
     that:
       - "result.changed == true"
       - "'<name>test_user</name>' in config.xml"
-      - "'<class>read-only</class>' in config.xml"
+      - "'<class>operator</class>' in config.xml"
 
 - name: Create user again (idempotent)
   net_user:
@@ -73,7 +73,7 @@
 
 - name: Teardown list of users
   net_user:
-    collection:
+    aggregate:
       - {name: test_user1, state: absent}
       - {name: test_user2, state: absent}
     provider: "{{ netconf }}"
@@ -81,7 +81,7 @@
 
 - name: Create list of users
   net_user:
-    collection:
+    aggregate:
       - {name: test_user1, role: operator, state: present}
       - {name: test_user2, role: read-only, state: present}
     provider: "{{ netconf }}"
@@ -101,7 +101,7 @@
 
 - name: Delete list of users
   net_user:
-    collection:
+    aggregate:
       - {name: test_user1, role: operator, state: absent}
       - {name: test_user2, role: read-only, state: absent}
     provider: "{{ netconf }}"

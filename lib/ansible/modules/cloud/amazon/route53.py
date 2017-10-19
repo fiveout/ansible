@@ -1,20 +1,12 @@
 #!/usr/bin/python
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# Copyright: Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'metadata_version': '1.0',
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['stableinterface'],
                     'supported_by': 'community'}
 
@@ -57,7 +49,7 @@ options:
     description:
       - The type of DNS record to create
     required: true
-    choices: [ 'A', 'CNAME', 'MX', 'AAAA', 'TXT', 'PTR', 'SRV', 'SPF', 'NS', 'SOA' ]
+    choices: [ 'A', 'CNAME', 'MX', 'AAAA', 'TXT', 'PTR', 'SRV', 'SPF', 'CAA', 'NS', 'SOA' ]
   alias:
     description:
       - Indicates if this is an alias record.
@@ -300,18 +292,21 @@ EXAMPLES = '''
       weight: 100
       health_check: "d994b780-3150-49fd-9205-356abdd42e75"
 
+# Add a CAA record (RFC 6844):
+- route53:
+      state: present
+      zone: example.com
+      record: example.com
+      type: CAA
+      value:
+        - 0 issue "ca.example.net"
+        - 0 issuewild ";"
+        - 0 iodef "mailto:security@example.com"
+
 '''
-
-MINIMUM_BOTO_VERSION = '2.28.0'
-WAIT_RETRY_SLEEP = 5  # how many seconds to wait between propagation status polls
-
 
 import time
 import distutils.version
-
-# import module snippets
-from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.ec2 import ec2_argument_spec, get_aws_connection_info
 
 try:
     import boto
@@ -323,6 +318,13 @@ try:
     HAS_BOTO = True
 except ImportError:
     HAS_BOTO = False
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ec2 import ec2_argument_spec, get_aws_connection_info
+
+
+MINIMUM_BOTO_VERSION = '2.28.0'
+WAIT_RETRY_SLEEP = 5  # how many seconds to wait between propagation status polls
 
 
 class TimeoutError(Exception):
@@ -407,7 +409,7 @@ def main():
         hosted_zone_id=dict(required=False, default=None),
         record=dict(required=True),
         ttl=dict(required=False, type='int', default=3600),
-        type=dict(choices=['A', 'CNAME', 'MX', 'AAAA', 'TXT', 'PTR', 'SRV', 'SPF', 'NS', 'SOA'], required=True),
+        type=dict(choices=['A', 'CNAME', 'MX', 'AAAA', 'TXT', 'PTR', 'SRV', 'SPF', 'CAA', 'NS', 'SOA'], required=True),
         alias=dict(required=False, type='bool'),
         alias_hosted_zone_id=dict(required=False),
         alias_evaluate_target_health=dict(required=False, type='bool', default=False),
@@ -612,6 +614,7 @@ def main():
         module.fail_json(msg='Timeout waiting for changes to replicate')
 
     module.exit_json(changed=True)
+
 
 if __name__ == '__main__':
     main()

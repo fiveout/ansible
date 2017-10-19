@@ -1,21 +1,14 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
-ANSIBLE_METADATA = {'metadata_version': '1.0',
+# Copyright: Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['preview'],
                     'supported_by': 'community'}
 
@@ -110,84 +103,19 @@ data:
     }
 '''
 
-import json
-import os
-
+from traceback import format_exc
 from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.urls import fetch_url
-
-
-class Response(object):
-
-    def __init__(self, resp, info):
-        self.body = None
-        if resp:
-            self.body = resp.read()
-        self.info = info
-
-    @property
-    def json(self):
-        if not self.body:
-            if "body" in self.info:
-                return json.loads(self.info["body"])
-            return None
-        try:
-            return json.loads(self.body)
-        except ValueError:
-            return None
-
-    @property
-    def status_code(self):
-        return self.info["status"]
-
-
-class Rest(object):
-
-    def __init__(self, module, headers):
-        self.module = module
-        self.headers = headers
-        self.baseurl = 'https://api.digitalocean.com/v2'
-
-    def _url_builder(self, path):
-        if path[0] == '/':
-            path = path[1:]
-        return '%s/%s' % (self.baseurl, path)
-
-    def send(self, method, path, data=None):
-        url = self._url_builder(path)
-        data = self.module.jsonify(data)
-
-        resp, info = fetch_url(self.module, url, data=data, headers=self.headers, method=method)
-
-        return Response(resp, info)
-
-    def get(self, path, data=None):
-        return self.send('GET', path, data)
-
-    def put(self, path, data=None):
-        return self.send('PUT', path, data)
-
-    def post(self, path, data=None):
-        return self.send('POST', path, data)
-
-    def delete(self, path, data=None):
-        return self.send('DELETE', path, data)
+from ansible.module_utils.digital_ocean import DigitalOceanHelper
+from ansible.module_utils._text import to_native
 
 
 def core(module):
-    try:
-        api_token = module.params['api_token'] or \
-            os.environ['DO_API_TOKEN'] or os.environ['DO_API_KEY']
-    except KeyError as e:
-        module.fail_json(msg='Unable to load %s' % e.message)
-
     state = module.params['state']
     name = module.params['name']
     resource_id = module.params['resource_id']
     resource_type = module.params['resource_type']
 
-    rest = Rest(module, {'Authorization': 'Bearer {0}'.format(api_token),
-                         'Content-type': 'application/json'})
+    rest = DigitalOceanHelper(module)
 
     # Check if api_token is valid or not
     response = rest.get('account')
@@ -220,6 +148,8 @@ def core(module):
             # Check if resource is already tagged or not
             found = False
             url = "{0}?tag_name={1}".format(resource_type, name)
+            if resource_type == 'droplet':
+                url = "droplets?tag_name={0}".format(name)
             response = rest.get(url)
             status_code = response.status_code
             resp_json = response.json
@@ -278,7 +208,8 @@ def main():
     try:
         core(module)
     except Exception as e:
-        module.fail_json(msg=str(e))
+        module.fail_json(msg=to_native(e), exception=format_exc())
+
 
 if __name__ == '__main__':
     main()

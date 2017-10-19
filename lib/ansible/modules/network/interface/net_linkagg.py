@@ -2,26 +2,15 @@
 # -*- coding: utf-8 -*-
 
 # (c) 2017, Ansible by Red Hat, inc
-#
-# This file is part of Ansible by Red Hat
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
-#
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-ANSIBLE_METADATA = {'metadata_version': '1.0',
+from __future__ import absolute_import, division, print_function
+__metaclass__ = type
+
+
+ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['preview'],
-                    'supported_by': 'core'}
+                    'supported_by': 'network'}
 
 
 DOCUMENTATION = """
@@ -40,22 +29,26 @@ options:
     required: true
   mode:
     description:
-      - Mode of the link aggregation group.
+      - Mode of the link aggregation group. A value of C(on) will enable LACP.
+        C(active) configures the link to actively information about the state of the link,
+        or it can be configured in C(passive) mode ie. send link state information only when
+        received them from another link.
     default: on
     choices: ['on', 'active', 'passive']
   members:
     description:
-      - List of members of the link aggregation group.
+      - List of members interfaces of the link aggregation group. The value can be
+        single interface or list of interfaces.
     required: true
   min_links:
     description:
       - Minimum members that should be up
         before bringing up the link aggregation group.
-  collection:
+  aggregate:
     description: List of link aggregation definitions.
   purge:
     description:
-      - Purge link aggregation groups not defined in the collections parameter.
+      - Purge link aggregation groups not defined in the I(aggregate) parameter.
     default: no
   state:
     description:
@@ -77,6 +70,18 @@ EXAMPLES = """
     name: bond0
     state: absent
 
+- name: Create aggregate of linkagg definitions
+  net_linkagg:
+    aggregate:
+        - { name: bond0, members: [eth1] }
+        - { name: bond1, members: [eth2] }
+
+- name: Remove aggregate of linkagg definitions
+  net_linkagg:
+    aggregate:
+      - name: bond0
+      - name: bond1
+    state: absent
 """
 
 RETURN = """

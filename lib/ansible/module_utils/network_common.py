@@ -25,11 +25,25 @@
 # LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 # USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
+import re
+import ast
+import operator
+
 from itertools import chain
 
-from ansible.module_utils.six import iteritems
+from ansible.module_utils.six import iteritems, string_types
 from ansible.module_utils.basic import AnsibleFallbackNotFound
-from ansible.module_utils.six import iteritems
+
+try:
+    from jinja2 import Environment, StrictUndefined
+    from jinja2.exceptions import UndefinedError
+    HAS_JINJA2 = True
+except ImportError:
+    HAS_JINJA2 = False
+
+
+OPERATORS = frozenset(['ge', 'gt', 'eq', 'neq', 'lt', 'le'])
+ALIASES = frozenset([('min', 'ge'), ('max', 'le'), ('exactly', 'eq'), ('neq', 'ne')])
 
 
 def to_list(val):
@@ -77,7 +91,9 @@ class Entity(object):
         * default - default value
     """
 
-    def __init__(self, module, attrs=None, args=[], keys=None, from_argspec=False):
+    def __init__(self, module, attrs=None, args=None, keys=None, from_argspec=False):
+        args = [] if args is None else args
+
         self._attributes = attrs or {}
         self._module = module
 
@@ -173,7 +189,7 @@ class EntityCollection(Entity):
             iterable = [super(EntityCollection, self).__call__(self._module.params, strict)]
 
         if not isinstance(iterable, (list, tuple)):
-            module.fail_json(msg='value must be an iterable')
+            self._module.fail_json(msg='value must be an iterable')
 
         return [(super(EntityCollection, self).__call__(i, strict)) for i in iterable]
 
@@ -281,3 +297,112 @@ def dict_merge(base, other):
         combined[key] = other.get(key)
 
     return combined
+
+
+def conditional(expr, val, cast=None):
+    match = re.match('^(.+)\((.+)\)$', str(expr), re.I)
+    if match:
+        op, arg = match.groups()
+    else:
+        op = 'eq'
+        assert (' ' not in str(expr)), 'invalid expression: cannot contain spaces'
+        arg = expr
+
+    if cast is None and val is not None:
+        arg = type(val)(arg)
+    elif callable(cast):
+        arg = cast(arg)
+        val = cast(val)
+
+    op = next((oper for alias, oper in ALIASES if op == alias), op)
+
+    if not hasattr(operator, op) and op not in OPERATORS:
+        raise ValueError('unknown operator: %s' % op)
+
+    func = getattr(operator, op)
+    return func(val, arg)
+
+
+def ternary(value, true_val, false_val):
+    '''  value ? true_val : false_val '''
+    if value:
+        return true_val
+    else:
+        return false_val
+
+
+def remove_default_spec(spec):
+    for item in spec:
+        if 'default' in spec[item]:
+            del spec[item]['default']
+
+
+def load_provider(spec, args):
+    provider = args.get('provider', {})
+    for key, value in iteritems(spec):
+        if key not in provider:
+            if key in args:
+                provider[key] = args[key]
+            elif 'fallback' in value:
+                provider[key] = _fallback(value['fallback'])
+            elif 'default' in value:
+                provider[key] = value['default']
+            else:
+                provider[key] = None
+    args['provider'] = provider
+    return provider
+
+
+def _fallback(fallback):
+    strategy = fallback[0]
+    args = []
+    kwargs = {}
+
+    for item in fallback[1:]:
+        if isinstance(item, dict):
+            kwargs = item
+        else:
+            args = item
+    try:
+        return strategy(*args, **kwargs)
+    except AnsibleFallbackNotFound:
+        pass
+
+
+class Template:
+
+    def __init__(self):
+        if not HAS_JINJA2:
+            raise ImportError("jinja2 is required but does not appear to be installed.  "
+                              "It can be installed using `pip install jinja2`")
+
+        self.env = Environment(undefined=StrictUndefined)
+        self.env.filters.update({'ternary': ternary})
+
+    def __call__(self, value, variables=None, fail_on_undefined=True):
+        variables = variables or {}
+
+        if not self.contains_vars(value):
+            return value
+
+        try:
+            value = self.env.from_string(value).render(variables)
+        except UndefinedError:
+            if not fail_on_undefined:
+                return None
+            raise
+
+        if value:
+            try:
+                return ast.literal_eval(value)
+            except:
+                return str(value)
+        else:
+            return None
+
+    def contains_vars(self, data):
+        if isinstance(data, string_types):
+            for marker in (self.env.block_start_string, self.env.variable_start_string, self.env.comment_start_string):
+                if marker in data:
+                    return True
+        return False

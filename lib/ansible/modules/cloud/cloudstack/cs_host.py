@@ -18,7 +18,7 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible. If not, see <http://www.gnu.org/licenses/>.
 
-ANSIBLE_METADATA = {'metadata_version': '1.0',
+ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['preview'],
                     'supported_by': 'community'}
 
@@ -42,67 +42,49 @@ options:
       - Url of the host used to create a host.
       - If not provided, C(http://) and param C(name) is used as url.
       - Only considered if C(state=present) and host does not yet exist.
-    required: false
-    default: null
   username:
     description:
       - Username for the host.
       - Required if C(state=present) and host does not yet exist.
-    required: false
-    default: null
   password:
     description:
       - Password for the host.
       - Required if C(state=present) and host does not yet exist.
-    required: false
-    default: null
   pod:
     description:
       - Name of the pod.
       - Required if C(state=present) and host does not yet exist.
-    required: false
-    default: null
   cluster:
     description:
       - Name of the cluster.
-    required: false
-    default: null
   hypervisor:
     description:
       - Name of the cluster.
       - Required if C(state=present) and host does not yet exist.
     choices: [ 'KVM', 'VMware', 'BareMetal', 'XenServer', 'LXC', 'HyperV', 'UCS', 'OVM', 'Simulator' ]
-    required: false
-    default: null
   allocation_state:
     description:
       - Allocation state of the host.
     choices: [ 'enabled', 'disabled' ]
-    required: false
-    default: null
   host_tags:
     description:
       - Tags of the host.
-    required: false
-    default: null
+    aliases: [ host_tag ]
   state:
     description:
       - State of the host.
-    required: false
     default: 'present'
     choices: [ 'present', 'absent' ]
   zone:
     description:
       - Name of the zone in which the host should be deployed.
       - If not set, default zone is used.
-    required: false
-    default: null
 extends_documentation_fragment: cloudstack
 '''
 
 EXAMPLES = '''
-# Ensure a host is present but disabled
-- local_action:
+- name: Ensure a host is present but disabled
+  local_action:
     module: cs_host
     name: ix-pod01-esx01.example.com
     cluster: vcenter.example.com/ch-zrh-ix/pod01-cluster01
@@ -114,22 +96,22 @@ EXAMPLES = '''
     - perf
     - gpu
 
-# Ensure an existing host is disabled
-- local_action:
+- name: Ensure an existing host is disabled
+  local_action:
     module: cs_host
     name: ix-pod01-esx01.example.com
     zone: ch-zrh-ix-01
     allocation_state: disabled
 
-# Ensure an existing host is disabled
-- local_action:
+- name: Ensure an existing host is disabled
+  local_action:
     module: cs_host
     name: ix-pod01-esx01.example.com
     zone: ch-zrh-ix-01
     allocation_state: enabled
 
-# Ensure a host is absent
-- local_action:
+- name: Ensure a host is absent
+  local_action:
     module: cs_host
     name: ix-pod01-esx01.example.com
     zone: ch-zrh-ix-01
@@ -349,7 +331,6 @@ zone:
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.cloudstack import (
     AnsibleCloudStack,
-    CloudStackException,
     cs_argument_spec,
     cs_required_together,
     CS_HYPERVISORS
@@ -415,7 +396,7 @@ class AnsibleCloudStackHost(AnsibleCloudStack):
             'name': pod_name,
             'zoneid': self.get_zone(key='id'),
         }
-        pods = self.cs.listPods(**args)
+        pods = self.query_api('listPods', **args)
         if pods:
             return self._get_by_key(key, pods['pod'][0])
         self.module.fail_json(msg="Pod %s not found" % pod_name)
@@ -428,7 +409,7 @@ class AnsibleCloudStackHost(AnsibleCloudStack):
             'name': cluster_name,
             'zoneid': self.get_zone(key='id'),
         }
-        clusters = self.cs.listClusters(**args)
+        clusters = self.query_api('listClusters', **args)
         if clusters:
             return self._get_by_key(key, clusters['cluster'][0])
         self.module.fail_json(msg="Cluster %s not found" % cluster_name)
@@ -447,7 +428,7 @@ class AnsibleCloudStackHost(AnsibleCloudStack):
         args = {
             'zoneid': self.get_zone(key='id'),
         }
-        res = self.cs.listHosts(**args)
+        res = self.query_api('listHosts', **args)
         if res:
             for h in res['host']:
                 if name in [h['ipaddress'], h['name']]:
@@ -530,9 +511,7 @@ class AnsibleCloudStackHost(AnsibleCloudStack):
             'hosttags': self.get_host_tags(),
         }
         if not self.module.check_mode:
-            host = self.cs.addHost(**args)
-            if 'errortext' in host:
-                self.module.fail_json(msg="Failed: '%s'" % host['errortext'])
+            host = self.query_api('addHost', **args)
             host = host['host'][0]
         return host
 
@@ -549,9 +528,7 @@ class AnsibleCloudStackHost(AnsibleCloudStack):
         if self.has_changed(args, host):
             self.result['changed'] = True
             if not self.module.check_mode:
-                host = self.cs.updateHost(**args)
-                if 'errortext' in host:
-                    self.module.fail_json(msg="Failed: '%s'" % host['errortext'])
+                host = self.query_api('updateHost', **args)
                 host = host['host']
 
         return host
@@ -566,9 +543,7 @@ class AnsibleCloudStackHost(AnsibleCloudStack):
             if not self.module.check_mode:
                 res = self.enable_maintenance(host)
                 if res:
-                    res = self.cs.deleteHost(**args)
-                    if 'errortext' in res:
-                        self.module.fail_json(msg="Failed: '%s'" % res['errortext'])
+                    res = self.query_api('deleteHost', **args)
         return host
 
     def enable_maintenance(self, host):
@@ -578,9 +553,7 @@ class AnsibleCloudStackHost(AnsibleCloudStack):
                 'id': host['id'],
             }
             if not self.module.check_mode:
-                res = self.cs.prepareHostForMaintenance(**args)
-                if 'errortext' in res:
-                    self.module.fail_json(msg="Failed: '%s'" % res['errortext'])
+                res = self.query_api('prepareHostForMaintenance', **args)
                 self.poll_job(res, 'host')
                 host = self._poll_for_maintenance()
         return host
@@ -592,9 +565,7 @@ class AnsibleCloudStackHost(AnsibleCloudStack):
                 'id': host['id'],
             }
             if not self.module.check_mode:
-                res = self.cs.cancelHostMaintenance(**args)
-                if 'errortext' in res:
-                    self.module.fail_json(msg="Failed: '%s'" % res['errortext'])
+                res = self.query_api('cancelHostMaintenance', **args)
                 host = self.poll_job(res, 'host')
         return host
 
@@ -627,7 +598,7 @@ def main():
         allocation_state=dict(choices=['enabled', 'disabled', 'maintenance']),
         pod=dict(),
         cluster=dict(),
-        host_tags=dict(type='list'),
+        host_tags=dict(type='list', aliases=['host_tag']),
         zone=dict(),
         state=dict(choices=['present', 'absent'], default='present'),
     ))
@@ -638,19 +609,15 @@ def main():
         supports_check_mode=True
     )
 
-    try:
-        acs_host = AnsibleCloudStackHost(module)
+    acs_host = AnsibleCloudStackHost(module)
 
-        state = module.params.get('state')
-        if state == 'absent':
-            host = acs_host.absent_host()
-        else:
-            host = acs_host.present_host()
+    state = module.params.get('state')
+    if state == 'absent':
+        host = acs_host.absent_host()
+    else:
+        host = acs_host.present_host()
 
-        result = acs_host.get_result(host)
-
-    except CloudStackException as e:
-        module.fail_json(msg='CloudStackException: %s' % str(e))
+    result = acs_host.get_result(host)
 
     module.exit_json(**result)
 
